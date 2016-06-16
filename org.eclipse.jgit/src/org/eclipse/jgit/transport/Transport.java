@@ -755,6 +755,9 @@ public abstract class Transport implements AutoCloseable {
 	/** Should push be all-or-nothing atomic behavior? */
 	private boolean pushAtomic;
 
+	/** Use the fast-path when building a single-commit? */
+	private boolean useFastSingleCommit;
+
 	/** Should push just check for operation result, not really push. */
 	private boolean dryRun;
 
@@ -995,6 +998,33 @@ public abstract class Transport implements AutoCloseable {
 	 */
 	public void setPushAtomic(final boolean atomic) {
 		this.pushAtomic = atomic;
+	}
+
+	/**
+	 * Default setting is false.
+	 *
+	 * @return true if we use the fast-path for pushing single commits
+	 * @since 4.5
+	 */
+	public boolean isUseFastSingleCommit() {
+		return useFastSingleCommit;
+	}
+
+	/**
+	 * Request fast-path for single commits.
+	 * <p>
+	 * The fast-path checks to see if we are pushing a single commit,
+	 * on top of a remote ref.  If so, it adds all objects that are different
+	 * from the parent, without checking whether they already exist previously.
+	 * This is much faster, though at the expense of possibly sending objects
+	 * that the remote already has.
+	 *
+	 * @param useFastSingleCommit
+	 *            true when we should enable the fast-path
+	 * @since 4.5
+	 */
+	public void setUseFastSingleCommit(final boolean useFastSingleCommit) {
+		this.useFastSingleCommit = useFastSingleCommit;
 	}
 
 	/**

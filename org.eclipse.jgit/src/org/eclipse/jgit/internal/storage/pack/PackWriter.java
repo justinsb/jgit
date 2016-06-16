@@ -97,6 +97,8 @@ import org.eclipse.jgit.lib.BitmapIndex;
 import org.eclipse.jgit.lib.BitmapIndex.BitmapBuilder;
 import org.eclipse.jgit.lib.BitmapObject;
 import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.FileMode;
+import org.eclipse.jgit.lib.MutableObjectId;
 import org.eclipse.jgit.lib.NullProgressMonitor;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectIdOwnerMap;
@@ -119,6 +121,7 @@ import org.eclipse.jgit.storage.pack.PackConfig;
 import org.eclipse.jgit.storage.pack.PackStatistics;
 import org.eclipse.jgit.transport.ObjectCountCallback;
 import org.eclipse.jgit.transport.WriteAbortedException;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.util.BlockList;
 import org.eclipse.jgit.util.TemporaryBuffer;
 
@@ -269,6 +272,8 @@ public class PackWriter implements AutoCloseable {
 	private boolean useCachedPacks;
 
 	private boolean useBitmaps;
+
+	private boolean useFastSingleCommit;
 
 	private boolean ignoreMissingUninteresting = true;
 
@@ -507,6 +512,19 @@ public class PackWriter implements AutoCloseable {
 	 */
 	public void setUseBitmaps(boolean useBitmaps) {
 		this.useBitmaps = useBitmaps;
+	}
+
+	/** @return true to switch to a fast-path for single commits. */
+	public boolean isUseFastSingleCommit() {
+		return useFastSingleCommit;
+	}
+
+	/**
+	 * @param useFastSingleCommit
+	 *            if set to true, a fast-path will be used for single commits.
+	 */
+	public void setUseFastSingleCommit(boolean useFastSingleCommit) {
+		this.useFastSingleCommit = useFastSingleCommit;
 	}
 
 	/** @return true if the index file cannot be created by this PackWriter. */
@@ -1631,6 +1649,12 @@ public class PackWriter implements AutoCloseable {
 			}
 		}
 
+		if (useFastSingleCommit && findObjectsToPackOneCommit(walker, want, have)) {
+			endPhase(countingMonitor);
+			stats.timeCounting = System.currentTimeMillis() - countingStart;
+			return;
+		}
+
 		List<ObjectId> all = new ArrayList<ObjectId>(want.size() + have.size());
 		all.addAll(want);
 		all.addAll(have);
@@ -1805,6 +1829,89 @@ public class PackWriter implements AutoCloseable {
 		endPhase(countingMonitor);
 		stats.timeCounting = System.currentTimeMillis() - countingStart;
 		stats.bitmapIndexMisses = -1;
+	}
+
+	private boolean findObjectsToPackOneCommit(
+		@NonNull ObjectWalk walker,
+		@NonNull Set<? extends ObjectId> wants,
+		@NonNull Set<? extends ObjectId> have) throws MissingObjectException, IncorrectObjectTypeException, IOException {
+		if (wants.size() != 1) {
+			return false;
+		}
+		ObjectId want = wants.iterator().next();
+		RevCommit commit = walker.parseCommit(want);
+		RevCommit[] parents = commit.getParents();
+		if (parents.length != 1) {
+			return false;
+		}
+		RevCommit parent = parents[0];
+		if (!have.contains(parent)) {
+			return false;
+		}
+
+		addObject(commit);
+
+		RevTree commitTree = commit.getTree();
+		RevCommit parentCommit = walker.parseCommit(parent);
+		RevTree parentTree = parentCommit.getTree();
+
+		addObject(commitTree);
+
+		addDiffs(commitTree, parentTree);
+
+		return true;
+	}
+
+	private void addDiffs(@NonNull AnyObjectId commitTree, @NonNull AnyObjectId parentTree) throws MissingObjectException, IncorrectObjectTypeException, CorruptObjectException, IOException {
+		MutableObjectId commitObjectId = new MutableObjectId();
+
+		TreeWalk treeWalk = new TreeWalk(reader);
+		treeWalk.setRecursive(false);
+		treeWalk.addTree(commitTree);
+
+		if (parentTree.equals(ObjectId.zeroId())) {
+			while (treeWalk.next()) {
+				treeWalk.getObjectId(commitObjectId, 0);
+
+				FileMode commitFileMode = treeWalk.getFileMode(0);
+
+				int type = commitFileMode.getObjectType();
+				int hash = 0; // TODO: ????
+				addObject(commitObjectId.copy(), type, hash);
+
+				if (type == Constants.OBJ_TREE) {
+					addDiffs(commitObjectId, ObjectId.zeroId());
+				}
+			}
+		} else {
+			MutableObjectId parentObjectId = new MutableObjectId();
+
+			treeWalk.addTree(parentTree);
+
+			while (treeWalk.next()) {
+				if (treeWalk.idEqual(0, 1)) {
+					continue;
+				}
+				treeWalk.getObjectId(commitObjectId, 0);
+				treeWalk.getObjectId(parentObjectId, 1);
+
+				FileMode commitFileMode = treeWalk.getFileMode(0);
+
+				if (commitFileMode.equals(FileMode.TYPE_MISSING)) {
+					continue;
+				}
+
+				int type = commitFileMode.getObjectType();
+				int hash = 0; // TODO: ????
+				addObject(commitObjectId.copy(), type, hash);
+
+				if (type == Constants.OBJ_TREE) {
+					addDiffs(commitObjectId, parentObjectId);
+				}
+			}
+		}
+
+		treeWalk.close();
 	}
 
 	private void findObjectsToPackUsingBitmaps(
