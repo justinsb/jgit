@@ -123,6 +123,7 @@ public abstract class BasePackPushConnection extends BasePackConnection implemen
 
 	private boolean sentCommand;
 	private boolean writePack;
+	private boolean useFastSingleCommit;
 
 	/** Time in milliseconds spent transferring the pack data. */
 	private long packTransferTime;
@@ -137,6 +138,7 @@ public abstract class BasePackPushConnection extends BasePackConnection implemen
 		super(packTransport);
 		thinPack = transport.isPushThin();
 		atomic = transport.isPushAtomic();
+		useFastSingleCommit = transport.isUseFastSingleCommit();
 	}
 
 	public void push(final ProgressMonitor monitor,
@@ -313,6 +315,7 @@ public abstract class BasePackPushConnection extends BasePackConnection implemen
 			writer.setIndexDisabled(true);
 			writer.setUseCachedPacks(true);
 			writer.setUseBitmaps(true);
+			writer.setUseFastSingleCommit(useFastSingleCommit);
 			writer.setThin(thinPack);
 			writer.setReuseValidatingObjects(false);
 			writer.setDeltaBaseAsOffset(capableOfsDelta);
