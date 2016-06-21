@@ -1632,6 +1632,12 @@ public class PackWriter implements AutoCloseable {
 		stats.interestingObjects = Collections.unmodifiableSet(new HashSet<ObjectId>(want));
 		stats.uninterestingObjects = Collections.unmodifiableSet(new HashSet<ObjectId>(have));
 
+		if (useFastSingleCommit && findObjectsToPackOneCommit(walker, want, have)) {
+			endPhase(countingMonitor);
+			stats.timeCounting = System.currentTimeMillis() - countingStart;
+			return;
+		}
+
 		canBuildBitmaps = config.isBuildBitmaps()
 				&& !shallowPack
 				&& have.isEmpty()
@@ -1647,12 +1653,6 @@ public class PackWriter implements AutoCloseable {
 				stats.bitmapIndexMisses = bitmapWalker.getCountOfBitmapIndexMisses();
 				return;
 			}
-		}
-
-		if (useFastSingleCommit && findObjectsToPackOneCommit(walker, want, have)) {
-			endPhase(countingMonitor);
-			stats.timeCounting = System.currentTimeMillis() - countingStart;
-			return;
 		}
 
 		List<ObjectId> all = new ArrayList<ObjectId>(want.size() + have.size());
