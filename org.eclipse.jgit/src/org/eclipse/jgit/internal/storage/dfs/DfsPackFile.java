@@ -498,6 +498,8 @@ public final class DfsPackFile {
 			if (ctx.getOptions().getStreamPackBufferSize() > 0)
 				rc.setReadAheadBytes(ctx.getOptions().getStreamPackBufferSize());
 			long position = 12;
+			rc.position(position);
+
 			long remaining = length - (12 + 20);
 			while (0 < remaining) {
 				DfsBlock b = cache.get(key, alignToBlock(position));
@@ -517,7 +519,7 @@ public final class DfsPackFile {
 					throw packfileIsTruncated();
 				else if (n > remaining)
 					n = (int) remaining;
-				out.write(buf.array(), 0, n);
+				out.write(buf.array(), buf.arrayOffset(), n);
 				position += n;
 				remaining -= n;
 			}
